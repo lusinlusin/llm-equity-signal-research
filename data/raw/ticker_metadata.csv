@@ -1,0 +1,52 @@
+ticker,sector,industry,market_cap,short_name
+AAPL,Technology,Consumer Electronics,4297079914496,Apple Inc.
+MSFT,Technology,Software - Infrastructure,2997002174464,Microsoft Corporation
+NVDA,Technology,Semiconductors,4938782998528,NVIDIA Corporation
+AMZN,Consumer Cyclical,Internet Retail,2577510957056,"Amazon.com, Inc."
+META,Communication Services,Internet Content & Information,1467640184832,"Meta Platforms, Inc."
+GOOGL,Communication Services,Internet Content & Information,4379809677312,Alphabet Inc.
+GOOG,Communication Services,Internet Content & Information,4352555352064,Alphabet Inc.
+BRK-B,Financial Services,Insurance - Diversified,1052512223232,Berkshire Hathaway Inc. New
+LLY,Healthcare,Drug Manufacturers - General,1022644584448,Eli Lilly and Company
+AVGO,Technology,Semiconductors,1786685554688,Broadcom Inc.
+JPM,Financial Services,Banks - Diversified,837186486272,JP Morgan Chase & Co.
+TSLA,Consumer Cyclical,Auto Manufacturers,1449559064576,"Tesla, Inc."
+UNH,Healthcare,Healthcare Plans,369042620416,UnitedHealth Group Incorporated
+V,Financial Services,Credit Services,610706980864,Visa Inc.
+XOM,Energy,Oil & Gas Integrated,627047596032,Exxon Mobil Corporation
+MA,Financial Services,Credit Services,431007793152,Mastercard Incorporated
+PG,Consumer Defensive,Household & Personal Products,348614590464,Procter & Gamble Company (The)
+COST,Consumer Defensive,Discount Stores,433079222272,Costco Wholesale Corporation
+HD,Consumer Cyclical,Home Improvement Retail,321061584896,"Home Depot, Inc. (The)"
+JNJ,Healthcare,Drug Manufacturers - General,575276711936,Johnson & Johnson
+ABBV,Healthcare,Drug Manufacturers - General,398553120768,AbbVie Inc.
+WMT,Consumer Defensive,Discount Stores,952661639168,Walmart Inc.
+MRK,Healthcare,Drug Manufacturers - General,290772451328,"Merck & Company, Inc."
+BAC,Financial Services,Banks - Diversified,391341506560,Bank of America Corporation
+NFLX,Communication Services,Entertainment,346948730880,"Netflix, Inc."
+KO,Consumer Defensive,Beverages - Non-Alcoholic,359623000064,Coca-Cola Company (The)
+PEP,Consumer Defensive,Beverages - Non-Alcoholic,197071863808,"Pepsico, Inc."
+CRM,Technology,Software - Application,143124430848,"Salesforce, Inc."
+ADBE,Technology,Software - Application,95510437888,Adobe Inc.
+CSCO,Technology,Communication Equipment,472341512192,"Cisco Systems, Inc."
+AMD,Technology,Semiconductors,748347850752,"Advanced Micro Devices, Inc."
+ORCL,Technology,Software - Infrastructure,592436723712,Oracle Corporation
+MCD,Consumer Cyclical,Restaurants,202270359552,McDonald's Corporation
+IBM,Technology,Information Technology Services,259423010816,International Business Machines
+GE,Industrials,Aerospace & Defense,337574002688,GE Aerospace
+CAT,Industrials,Farm & Heavy Construction Machinery,398559444992,"Caterpillar, Inc."
+GS,Financial Services,Capital Markets,298594697216,"Goldman Sachs Group, Inc. (The)"
+RTX,Industrials,Aerospace & Defense,242120196096,RTX Corporation
+SPGI,Financial Services,Financial Data & Stock Exchanges,126824161280,S&P Global Inc.
+INTU,Technology,Software - Application,77837688832,Intuit Inc.
+NOW,Technology,Software - Application,113015889920,"ServiceNow, Inc."
+QCOM,Technology,Semiconductors,203948998656,QUALCOMM Incorporated
+TXN,Technology,Semiconductors,259303653376,Texas Instruments Incorporated
+AMGN,Healthcare,Drug Manufacturers - General,186172375040,Amgen Inc.
+HON,Industrials,Conglomerates,132631896064,Honeywell International Inc.
+NEE,Utilities,Utilities - Regulated Electric,177432870912,"NextEra Energy, Inc."
+LOW,Consumer Cyclical,Home Improvement Retail,121135153152,"Lowe's Companies, Inc."
+UPS,Industrials,Integrated Freight & Logistics,88587657216,"United Parcel Service, Inc."
+TMO,Healthcare,Diagnostics & Research,181185789952,Thermo Fisher Scientific Inc
+ISRG,Healthcare,Medical Instruments & Supplies,148068401152,"Intuitive Surgical, Inc."
+BKNG,Consumer Cyclical,Travel Services,124398985216,Booking Holdings Inc. Common St
