@@ -34,6 +34,16 @@ def _final_cumulative_return(portfolio_returns: pd.DataFrame) -> float:
     return float((1.0 + portfolio_returns["long_short_return"]).prod() - 1.0)
 
 
+def _format_significance_value(metric: str, column: str, value: float) -> str:
+    if pd.isna(value):
+        return "nan"
+    if column == "strategy_percentile":
+        return _format_pct(value)
+    if metric == "sharpe_ratio":
+        return f"{value:.2f}"
+    return _format_pct(value)
+
+
 def _common_signal_coverage(signals: dict[str, pd.DataFrame], forward_returns: pd.DataFrame) -> dict[str, pd.DataFrame]:
     common_index = forward_returns.index
     common_columns = forward_returns.columns
@@ -106,7 +116,10 @@ def _write_report(
         ["strategy_value", "random_mean", "random_p50", "random_p95", "strategy_percentile"]
     ].copy()
     for column in ("strategy_value", "random_mean", "random_p50", "random_p95", "strategy_percentile"):
-        sig_display[column] = sig_display[column].map(_format_pct)
+        sig_display[column] = [
+            _format_significance_value(metric, column, value)
+            for metric, value in sig_display[column].items()
+        ]
 
     lines = [
         f"# {title}",
@@ -155,6 +168,7 @@ def run_round5_soundness_comparison(
     yoy_neutral_label: str = "deepseek_yoy_relative_sector_size_neutral",
     change_notes: tuple[str, ...] = DEFAULT_CHANGE_NOTES,
     llm_api_rerun: str = "no",
+    include_absolute_llm: bool = True,
 ) -> dict[str, pd.DataFrame | pd.Series]:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -168,7 +182,7 @@ def run_round5_soundness_comparison(
     forward_returns = price_results["forward_returns"]
 
     text_features = score_text_records(load_text_dataset(text_data_path))
-    absolute_llm_features = load_text_dataset(absolute_llm_features_path)
+    absolute_llm_features = load_text_dataset(absolute_llm_features_path) if include_absolute_llm else None
     yoy_features = load_text_dataset(yoy_features_path)
     metadata = load_ticker_metadata(metadata_path)
 
@@ -185,37 +199,39 @@ def run_round5_soundness_comparison(
         signal_column="enhanced_text_signal",
     )
     enhanced_sector_size_neutral = neutralize_signal(enhanced_text_signal, metadata)
-    absolute_llm_signal = build_point_in_time_text_signal_matrix(
-        absolute_llm_features,
-        monthly_index=forward_returns.index,
-        tickers=forward_returns.columns,
-        signal_column="llm_text_signal",
-    )
     yoy_relative_signal = build_point_in_time_text_signal_matrix(
         yoy_features,
         monthly_index=forward_returns.index,
         tickers=forward_returns.columns,
         signal_column=yoy_signal_column,
     )
-    absolute_llm_sector_size_neutral = neutralize_signal(absolute_llm_signal, metadata)
     yoy_relative_sector_size_neutral = neutralize_signal(yoy_relative_signal, metadata)
 
     yoy_available_signal = (
         yoy_relative_signal.dropna(axis=0, how="all").dropna(axis=1, how="all")
     )
 
-    signals = _common_signal_coverage(
-        {
-            "before_text_signal": before_text_signal,
-            "enhanced_text_signal": enhanced_text_signal,
-            "enhanced_sector_size_neutral": enhanced_sector_size_neutral,
-            "deepseek_absolute_llm_text_signal": absolute_llm_signal,
-            "deepseek_absolute_sector_size_neutral": absolute_llm_sector_size_neutral,
-            yoy_signal_label: yoy_relative_signal,
-            yoy_neutral_label: yoy_relative_sector_size_neutral,
-        },
-        forward_returns,
-    )
+    signal_inputs = {
+        "before_text_signal": before_text_signal,
+        "enhanced_text_signal": enhanced_text_signal,
+        "enhanced_sector_size_neutral": enhanced_sector_size_neutral,
+        yoy_signal_label: yoy_relative_signal,
+        yoy_neutral_label: yoy_relative_sector_size_neutral,
+    }
+    if absolute_llm_features is not None:
+        absolute_llm_signal = build_point_in_time_text_signal_matrix(
+            absolute_llm_features,
+            monthly_index=forward_returns.index,
+            tickers=forward_returns.columns,
+            signal_column="llm_text_signal",
+        )
+        signal_inputs["deepseek_absolute_llm_text_signal"] = absolute_llm_signal
+        signal_inputs["deepseek_absolute_sector_size_neutral"] = neutralize_signal(
+            absolute_llm_signal,
+            metadata,
+        )
+
+    signals = _common_signal_coverage(signal_inputs, forward_returns)
 
     random_signal = make_persistent_random_signal_like(
         signals[yoy_neutral_label],
@@ -249,8 +265,12 @@ def run_round5_soundness_comparison(
     target_signal = signals[yoy_neutral_label]
     coverage = pd.Series(
         {
-            "absolute_llm_feature_rows": int(absolute_llm_features.shape[0]),
-            "absolute_llm_feature_tickers": int(absolute_llm_features["ticker"].nunique()),
+            "absolute_llm_feature_rows": (
+                int(absolute_llm_features.shape[0]) if absolute_llm_features is not None else "not included"
+            ),
+            "absolute_llm_feature_tickers": (
+                int(absolute_llm_features["ticker"].nunique()) if absolute_llm_features is not None else "not included"
+            ),
             "yoy_feature_rows": int(yoy_features.shape[0]),
             "yoy_feature_tickers": int(yoy_features["ticker"].nunique()),
             "yoy_signal_months_before_all_signal_filter": int(yoy_available_signal.shape[0]),
@@ -330,6 +350,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--artifact-prefix", default="round5_soundness", help="Prefix for summary report artifacts.")
     parser.add_argument("--signal-prefix", default="round5", help="Prefix for per-signal artifacts.")
     parser.add_argument("--report-title", default="Round 5 Soundness Fix Comparison", help="Markdown report title.")
+    parser.add_argument("--exclude-absolute-llm", action="store_true", help="Exclude stale absolute LLM features from the comparison.")
     return parser.parse_args()
 
 
@@ -349,6 +370,7 @@ def main() -> None:
         artifact_prefix=args.artifact_prefix,
         signal_prefix=args.signal_prefix,
         report_title=args.report_title,
+        include_absolute_llm=not args.exclude_absolute_llm,
     )
     print("Round 5 soundness comparison complete")
     print(results["coverage"].to_string())

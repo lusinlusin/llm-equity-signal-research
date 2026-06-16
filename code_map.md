@@ -59,6 +59,8 @@ reports = 输出结果
 | 跑 Round 5 soundness-fix comparison | `python3 -m src.analysis.compare_round5_soundness` |
 | 跑 Round 6 de-anchored prompt pilot/full workflow | `python3 scripts/run_round6_deanchored_workflow.py` |
 | 跑 Round 6 diff-surprise prompt pilot/full workflow | `python3 scripts/run_round6_diff_surprise_workflow.py` |
+| 跑 Round 7 Item 1A repair rerun comparison | `python3 scripts/run_round7_item1a_repair_comparison.py` |
+| 跑 Round 7 error analysis + portfolio variants | `python3 scripts/analyze_round7_error_and_portfolio_variants.py` |
 | 单独重画 legacy cumulative return 图 | `scripts/plot_cumulative_returns.py` |
 
 ## 推荐阅读顺序
@@ -175,6 +177,26 @@ reports/round1_deterministic_robustness/
 用途：单独从已有 portfolio returns 重画 cumulative return comparison。
 
 现在主要用于 legacy prototype 的旧图，不是当前主实验的核心入口。
+
+### `scripts/analyze_round7_error_and_portfolio_variants.py`
+
+用途：基于已生成的 Round 7 post-repair signal 做 error analysis，并测试组合构造变体。
+
+它不会重新调用 DeepSeek。主要读取：
+
+```text
+data/processed/llm_diff_surprise_features_deepseek_item1a_repair.csv
+reports/round7_item1a_repair_rerun/round7_item1a_repair_deepseek_diff_surprise_sector_size_neutral.csv
+```
+
+主要输出：
+
+```text
+reports/round7_item1a_repair_rerun/round7_error_analysis_and_portfolio_variants.md
+reports/round7_item1a_repair_rerun/round7_portfolio_variant_metrics.csv
+reports/round7_item1a_repair_rerun/round7_monthly_error_analysis.csv
+reports/round7_item1a_repair_rerun/round7_worst_month_holdings.csv
+```
 
 ## src/data/
 
@@ -364,7 +386,7 @@ llm_yoy_relative_signal
 
 ### Diff-Surprise YoY LLM Signal
 
-对应 Round 6 Stage B。
+对应 Round 6 Stage B 和 Round 7 post-repair rerun。
 
 相关文件：
 
@@ -375,6 +397,7 @@ src/llm/deepseek_diff_surprise_client.py
 src/llm/diff_surprise_prompts.py
 src/llm/diff_surprise_schema.py
 scripts/run_round6_diff_surprise_workflow.py
+scripts/run_round7_item1a_repair_comparison.py
 ```
 
 输入：
@@ -389,7 +412,9 @@ data/raw/ticker_metadata.csv
 
 ```text
 data/processed/llm_diff_surprise_features_deepseek.csv
+data/processed/llm_diff_surprise_features_deepseek_item1a_repair.csv
 reports/round6/round6_diff_surprise_*
+reports/round7_item1a_repair_rerun/round7_item1a_repair_*
 ```
 
 signal：
@@ -398,7 +423,7 @@ signal：
 llm_diff_surprise_signal
 ```
 
-核心区别：先用 deterministic block diff 找 current/prior Item 1A 的新增、删除、修改段落，再让 DeepSeek 只判断这些 changed sections 是否包含 company-specific investable surprise。
+核心区别：先用 deterministic block diff 找 current/prior Item 1A 的新增、删除、修改段落，再让 DeepSeek 只判断这些 changed sections 是否包含 company-specific investable surprise。Round 7 使用修复后的 Item 1A parser 重新生成 raw text，并 full rerun 211 条 diff-surprise LLM features。
 
 ### `src/llm/mock.py`
 
@@ -637,7 +662,27 @@ Round 6。
 ```text
 Stage A de-anchored YoY pilot failed the distribution gate.
 Stage B diff-surprise prompt completed 211 rows / 42 tickers.
-Best LLM result: deepseek_diff_surprise_sector_size_neutral, 4.46% annualized return, 0.43 Sharpe, 28.98% final cumulative return.
+Pre-repair best LLM result: deepseek_diff_surprise_sector_size_neutral, 4.46% annualized return, 0.43 Sharpe, 28.98% final cumulative return.
+```
+
+注意：Round 6 现在是 historical / pre-repair result。后续 Item 1A parser repair 改动了 122 / 293 raw rows，所以 Round 6 DeepSeek features 不再作为 current evidence。
+
+### `reports/round7_item1a_repair_rerun/`
+
+Round 7。
+
+核心问题：
+
+```text
+修复 SEC Item 1A parser 后，Round 6 diff-surprise LLM result 是否还能成立？
+```
+
+主要结果：
+
+```text
+Full 211-row DeepSeek diff-surprise rerun completed on repaired text.
+deepseek_diff_surprise_sector_size_neutral: 0.15% annualized return, 0.07 Sharpe, 0.88% final cumulative return.
+Mean IC remains positive at 1.89%, but portfolio returns are near random.
 ```
 
 ## data/
@@ -690,6 +735,18 @@ DeepSeek YoY relative LLM extraction output。
 
 也用于 Round 5 soundness-fix comparison。
 
+### `data/processed/llm_diff_surprise_features_deepseek_item1a_repair.csv`
+
+Round 7 post-repair DeepSeek diff-surprise extraction output。
+
+用于：
+
+```text
+reports/round7_item1a_repair_rerun/
+```
+
+这是当前 diff-surprise LLM 的有效输出；旧的 `data/processed/llm_diff_surprise_features_deepseek.csv` 是 pre-repair Round 6 historical output。
+
 ## Round Mapping
 
 | Round | 入口 | 主要输入 | 主要输出 | 目的 |
@@ -701,7 +758,8 @@ DeepSeek YoY relative LLM extraction output。
 | Round 4 | `src.analysis.compare_yoy_relative_all_signals` | full current + prior + LLM outputs | `reports/round4_yoy_relative_full/` | full YoY relative comparison |
 | Round 5 | `src.analysis.compare_round5_soundness` | existing LLM outputs, metadata, prices | `reports/round5/` | tie-handling fix, persistent random baseline, LLM sector/size neutralization |
 | Round 6A | `scripts/run_round6_deanchored_workflow.py` | de-anchored YoY prompt, 30-row pilot sample | `reports/round6/` | removed old numeric anchors but failed the full-run gate because scores collapsed into coarse buckets |
-| Round 6B | `scripts/run_round6_diff_surprise_workflow.py` | deterministic YoY diffs, diff-surprise DeepSeek prompt | `reports/round6/` | best LLM result so far; neutralized signal reached 4.46% annualized return and 0.43 Sharpe, but not 95% significant |
+| Round 6B | `scripts/run_round6_diff_surprise_workflow.py` | deterministic YoY diffs, diff-surprise DeepSeek prompt | `reports/round6/` | pre-repair historical result; later parser repair made these DeepSeek features stale |
+| Round 7 | `scripts/run_round7_item1a_repair_comparison.py` | repaired raw text, full 211-row post-repair diff-surprise features | `reports/round7_item1a_repair_rerun/` | current result; neutralized diff-surprise LLM falls to 0.15% annualized return and 0.07 Sharpe |
 
 ## Output File Types
 
@@ -769,73 +827,26 @@ prior 主要服务于 YoY relative prompt。
 
 ## 如果你只想复现当前主结果
 
-按顺序跑：
+当前主结果是 Round 7 post-repair rerun。历史 round 的命令见上面的 Round Mapping；如果只想复现当前 README 里的结果，优先使用已有 post-repair LLM feature file：
+
+This command regenerates Round 7 diagnostics, backtests, random-baseline comparison, and cumulative-return plot without making new API calls:
 
 ```bash
-python3 scripts/download_sec_10k_risk_factors.py \
-  --mode both \
-  --start-year 2020 \
-  --end-year 2025 \
-  --output data/raw/sec_10k_risk_factors.csv \
-  --prior-output data/raw/sec_10k_risk_factors_prior_context.csv
+python3 scripts/run_round7_item1a_repair_comparison.py
 ```
 
-```bash
-python3 scripts/download_ticker_metadata.py \
-  --output data/raw/ticker_metadata.csv
-```
+If you intentionally want to rerun the 211 DeepSeek calls on repaired text, write to the Round 7 output file and use `--resume`:
 
 ```bash
-python3 scripts/run_research_upgrade.py \
-  --start 2020-01-01 \
-  --end 2026-01-01 \
-  --n-trials 500 \
-  --output-dir reports/round1_deterministic_robustness
-```
-
-```bash
-python3 -m src.analysis.compare_llm_results \
-  --llm-features data/processed/llm_text_features_deepseek.csv \
-  --output-dir reports/round2_deepseek_absolute \
-  --start 2020-01-01 \
-  --end 2026-01-01
-```
-
-```bash
-python3 -m src.analysis.compare_yoy_relative_all_signals \
-  --yoy-features data/processed/llm_yoy_relative_features_deepseek.csv \
-  --absolute-llm-features data/processed/llm_text_features_deepseek.csv \
-  --text-data data/raw/sec_10k_risk_factors.csv \
+python3 -m src.llm.extract_diff_surprise_signals \
+  --input data/raw/sec_10k_risk_factors.csv \
   --metadata data/raw/ticker_metadata.csv \
-  --output-dir reports/round4_yoy_relative_full \
-  --start 2020-01-01 \
-  --end 2026-01-01 \
-  --n-trials 500
+  --prior-context data/raw/sec_10k_risk_factors_prior_context.csv \
+  --output data/processed/llm_diff_surprise_features_deepseek_item1a_repair.csv \
+  --resume
 ```
 
-```bash
-python3 -m src.analysis.compare_round5_soundness \
-  --yoy-features data/processed/llm_yoy_relative_features_deepseek.csv \
-  --absolute-llm-features data/processed/llm_text_features_deepseek.csv \
-  --text-data data/raw/sec_10k_risk_factors.csv \
-  --metadata data/raw/ticker_metadata.csv \
-  --output-dir reports/round5 \
-  --start 2020-01-01 \
-  --end 2026-01-01 \
-  --n-trials 500
-```
-
-To reproduce the latest Round 6 diff-surprise comparison, run the workflow with `--skip-pilot`. The script still requires `DEEPSEEK_API_KEY` to be configured, but extraction uses `--resume`; if `data/processed/llm_diff_surprise_features_deepseek.csv` already contains all 211 rows, it will not re-query completed rows and will rerun the diagnostics/comparison against the existing full output:
-
-```bash
-python3 scripts/run_round6_diff_surprise_workflow.py \
-  --skip-pilot \
-  --start 2020-01-01 \
-  --end 2026-01-01 \
-  --n-trials 500
-```
-
-注意：Round 6 diff-surprise 是一个 LLM workflow。当前项目已经有 processed LLM output；不要删除已有 output 后重跑，除非你明确想重新产生 API 成本。
+注意：Round 7 diff-surprise rerun 会产生 DeepSeek API 成本。当前项目已经有 processed post-repair LLM output；不要删除已有 output 后重跑，除非你明确想重新产生 API 成本。
 
 ## 当前最重要的文档
 

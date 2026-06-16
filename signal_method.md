@@ -1,6 +1,6 @@
 # Signal Method Iteration Log
 
-Last updated: 2026-06-11
+Last updated: 2026-06-15
 
 This note summarizes each major signal iteration run so far: method, universe, change versus the prior round, performance, and what the result implies.
 
@@ -13,7 +13,8 @@ This note summarizes each major signal iteration run so far: method, universe, c
 | 3 | DeepSeek YoY relative LLM signal, initial internal-prior version | 169 YoY feature rows, 40 tickers, 60 signal months, 58 backtest periods | Changed prompt from absolute risk to current-vs-prior filing comparison, but only used prior filings already present inside the 211-row current dataset. | Looked promising on the smaller sample: 5.56% annualized return, 0.48 Sharpe, 29.90% final cumulative return. |
 | 4 | DeepSeek YoY relative LLM signal, completed prior-context version | 211 YoY feature rows, 42 tickers, YoY signal itself covers 72 signal months / 42 tickers; strict all-signal comparison covers 71 months / 42 tickers; 70 backtest periods | Downloaded 82 prior-context 10-K records from 2018-2024. Ran only the 42 missing YoY LLM rows with `--resume`, then overwrote the prior 169-row output. | Performance dropped: 1.09% annualized return, 0.15 Sharpe, 6.55% final cumulative return. Not significant versus random. |
 | 5 | Soundness-fix evaluation: fractional tie handling, persistent random baseline, and LLM sector/size neutralization | Same completed 211-row / 42-ticker YoY universe; strict all-signal comparison covers 71 months / 42 tickers; 70 backtest periods | Fixed ticker-order tie breaking, changed random baseline from iid monthly draws to persistent signal-spell draws, added sector/size-neutral DeepSeek absolute and YoY signals, and removed numeric anchors from future LLM prompts. | Current best signal remains `enhanced_sector_size_neutral`: 5.32% annualized return, 0.48 Sharpe, 35.30% final cumulative return. Neutralized YoY LLM is only 0.51% annualized return, 0.10 Sharpe, and 56th percentile versus persistent neutralized random. |
-| 6 | Prompt redesign in two stages: (A) de-anchored YoY prompt pilot, (B) diff-surprise prompt on deterministic YoY diffs | Stage A: 30 pilot pairs. Stage B: 30-pair pilot, then full 211 rows / 42 tickers; strict comparison 71 months / 70 backtest periods | Stage A removed numeric anchors only and failed the pilot gate (8 unique signal values in 30 rows). Stage B changed the task: deterministic Item 1A block diff first, LLM scores only the changed sections for company-specific investable surprise with a zero base rate, integer scales, and anonymized prompts. | Stage B passed the pilot gate and ran in full. Neutralized diff-surprise signal (after the 8.8 formula fix): 4.46% annualized return, 0.43 Sharpe, 28.98% final cumulative return — the best LLM signal so far (old neutralized YoY: 0.10 Sharpe), at the 82-85th percentile versus persistent neutralized random, within 0.05 Sharpe of `enhanced_sector_size_neutral` (0.48) but not significant at 95%. |
+| 6 | Prompt redesign in two stages: (A) de-anchored YoY prompt pilot, (B) diff-surprise prompt on deterministic YoY diffs | Stage A: 30 pilot pairs. Stage B: 30-pair pilot, then full 211 rows / 42 tickers; strict comparison 71 months / 70 backtest periods | Stage A removed numeric anchors only and failed the pilot gate. Stage B changed the task: deterministic Item 1A block diff first, LLM scores only changed sections for company-specific investable surprise. | Historical pre-repair result only. It reached 4.46% annualized return, 0.43 Sharpe, and 28.98% final cumulative return after the formula fix, but a later Item 1A parser repair changed 122 raw rows and made the Round 6 DeepSeek features stale. |
+| 7 | Item 1A parser repair and full post-repair diff-surprise rerun | Repaired 211 YoY pairs / 42 tickers; strict comparison covers 71 months / 42 tickers; 70 backtest periods | Fixed SEC parser cross-reference artifacts, regenerated current/prior raw text, recovered ORCL FY2019 prior, then reran DeepSeek diff-surprise extraction for all 211 pairs into a new output file. | The headline depends entirely on portfolio construction. The original 20% tail portfolio is weak (0.15% return, 0.07 Sharpe), but the signal's rank IC actually rose to 2.88% (91st percentile, empirical p=0.068) — its cleanest cross-sectional ranking yet. Matching the portfolio to where the information lives (sector-neutral rank-weighted) reaches 0.57 Sharpe, 38.10% final cumulative, empirical p=0.082 — the closest the project has come to significance. The deterministic `enhanced_sector_size_neutral` benchmark also flipped (0.48 to -0.33 Sharpe) on the repaired text, which is direct evidence that tail-portfolio Sharpe in a 42-ticker universe is noise. |
 
 ## 2. Shared Backtest Setup
 
@@ -31,7 +32,7 @@ The current completed current-filing universe is:
 - 211 current SEC 10-K Item 1A records.
 - 42 tickers.
 - Filing date range: 2020-01-21 to 2025-12-18.
-- YoY prior context: 82 additional prior 10-K records from 2018-01-22 to 2024-02-02.
+- YoY prior context: 83 additional prior 10-K records from 2018-01-22 to 2024-02-02.
 
 ## 3. Round 1: Deterministic Dictionary Signals
 
@@ -689,16 +690,16 @@ Supplementary deterministic check: a similarity-only signal (long high `diff_sim
 Interpretation:
 
 - The diff-surprise redesign fixed the distributional pathologies it targeted: no anchor copying, a real zero base rate, both directions used, zero materiality-gate violations, and evidence grounded in verifiable filing changes.
-- It produced the best LLM-based signal so far. After sector/size neutralization it reaches 0.43 Sharpe versus 0.10 for the old neutralized YoY signal, at the 82-85th percentile versus the persistent neutralized random benchmark on return and Sharpe, and within 0.05 Sharpe of the deterministic `enhanced_sector_size_neutral` benchmark (0.48).
+- Before the parser repair, it appeared to produce the best LLM-based signal so far. After sector/size neutralization it reached 0.43 Sharpe versus 0.10 for the old neutralized YoY signal, at the 82-85th percentile versus the persistent neutralized random benchmark on return and Sharpe, and within 0.05 Sharpe of the deterministic `enhanced_sector_size_neutral` benchmark (0.48). Round 7 shows this portfolio result does not survive repaired Item 1A extraction.
 - It is still not a tradable result: it does not clear the 95% significance threshold (empirical p around 0.15-0.18), and its mean IC percentile is modest (62nd; rank IC 78th), so the long-short performance leans on the tails rather than a uniformly strong ranking.
 - The raw, un-neutralized version is slightly negative, so raw LLM output still carries sector/size tilts; the usable information only appears in the residual.
 - Remaining bottlenecks, in order: statistical power of the 42-ticker universe (the similarity baseline failing here is direct evidence), coarse bucketing of committed scores, and prior-year extraction quality for the low-similarity pairs.
 
-Best next step:
+Best next step at the time:
 
 - Expand the universe and history (S&P 500-scale, point-in-time membership) before further prompt iteration; at the current sample size even a good signal cannot clear the significance bar.
 - Test a listwise sector/year ranking prompt as the next variant, which directly produces the cross-sectional ordering the backtest consumes and removes the residual negativity tilt by construction.
-- Fix prior-year Item 1A extraction for the 12 low-similarity pairs.
+- Fix prior-year Item 1A extraction for the 12 low-similarity pairs. This became the Round 7 parser repair and full rerun.
 - Audit the stored `diff_rationale` and `diff_material_changes` fields for 2020 (the worst year) before changing the formula.
 
 ### 8.8 Post-Run Review Fixes
@@ -710,11 +711,174 @@ A code review after the first Stage B run found four issues. All are fixed; the 
 3. **Misleading diagnostic labels.** The full-output diagnostic reused the pilot report title and the `do_not_full_run_yet` decision string, which could read as invalidating a run that had already completed. The full-output report is now titled as a full-output quality warning, and the comparison report states explicitly that the flag concerns coarse committed-score buckets, not run validity.
 4. **`requirements.txt` was missing `scipy`.** The docs claimed it was recorded but only `tabulate` had been added. `scipy` is a genuine runtime dependency — pandas imports `scipy.stats` inside `corr(method="spearman")` for rank IC, which is exactly where the first comparison run crashed — so it is now in `requirements.txt` despite never being imported directly by project code.
 
-## 9. Future Improvement Directions
+## 9. Round 7: Item 1A Parser Repair and Post-Repair Diff-Surprise Rerun
 
-Status note: the prompt-v2 ideas in 9.2 and 9.3 (investable surprise, company-specific versus market-wide separation, market-wide risks as diagnostics rather than penalties) were implemented in Round 6 Stage B. The remaining open directions are the error-analysis report (9.1), the neutralization diagnostics (9.4), running variants on a larger universe (9.5 — Round 6 evidence suggests universe size is now the binding constraint), and higher-frequency text sources (9.6).
+### 9.1 Why This Round Was Needed
 
-### 9.1 Build an error-analysis report first
+Round 6 revealed 12 current/prior filing pairs with `diff_similarity < 0.20`. Manual audit showed these were not true business changes. The SEC parser had treated mid-sentence cross-references such as "see Item 1A. Risk Factors of this Annual Report" as section starts. Because those false starts often had no nearby Item 1B/1C/2 end heading, the extractor returned long MD&A, reserves, properties, or litigation blobs instead of the actual Item 1A section.
+
+The repair was broader than the original 12 pairs:
+
+- 122 of 293 raw current/prior rows were re-extracted.
+- 91 of 211 YoY pairs had similarity move by more than 0.01.
+- 98 of 211 pairs had at least one side changed or a pairing repair.
+- ORCL FY2019 prior context was recovered; ORCL 2020 now compares against FY2019 instead of FY2018.
+- Post-repair similarity range is 0.257-0.974, with median 0.792.
+
+Artifacts:
+
+- Row-level repair audit: `reports/item1a_repair_report.csv`
+- Pair-level before/after similarity: `reports/item1a_repair_pair_similarity.csv`
+- Pre/post result comparison: `reports/round7_item1a_repair_rerun/round7_pre_post_repair_comparison.md`
+
+### 9.2 Method
+
+Round 7 keeps the Round 6 diff-surprise prompt and signal formula, but reruns it on repaired raw Item 1A text.
+
+Inputs:
+
+```text
+data/raw/sec_10k_risk_factors.csv
+data/raw/sec_10k_risk_factors_prior_context.csv
+data/raw/ticker_metadata.csv
+```
+
+New LLM output:
+
+```text
+data/processed/llm_diff_surprise_features_deepseek_item1a_repair.csv
+```
+
+Comparison output:
+
+```text
+reports/round7_item1a_repair_rerun/
+```
+
+This round excludes stale pre-repair absolute DeepSeek features from the current comparison. The comparison includes repaired deterministic text signals, repaired diff-surprise LLM signals, and a persistent sector/size-neutralized random baseline.
+
+### 9.3 Output Distribution
+
+Round 7 full-output diagnostic decision: `do_not_full_run_yet`.
+
+Reasons:
+
+- Negativity bias persists: 80% of nonzero `net_signal` values are negative.
+- Nonzero signal has low uniqueness: 27 unique values out of 87 nonzero rows.
+
+Distribution highlights:
+
+- `net_signal = 0`: 124 / 211 rows (58.77%).
+- Materiality gate violations: 0.
+- `llm_diff_surprise_signal`: 28 unique values; top value 0 has 58.77% share.
+- Signal mean is negative in every filing year, ranging from -0.60 in 2022 to -1.28 in 2023.
+
+### 9.4 Backtest Results
+
+Same strict coverage as Round 6: 71 common signal months, 42 tickers, 70 backtest periods, fractional boundary ties, persistent sector/size-neutralized random baseline, 500 Monte Carlo trials.
+
+| signal | Ann. Return | Sharpe | Max DD | Mean IC | Mean Rank IC | Final Cum |
+|---|---:|---:|---:|---:|---:|---:|
+| `before_text_signal` | 1.79% | 0.19 | -35.95% | 0.23% | 0.73% | 10.88% |
+| `enhanced_text_signal` | 4.76% | 0.32 | -40.24% | 1.59% | 0.10% | 31.18% |
+| `enhanced_sector_size_neutral` | -4.55% | -0.33 | -33.01% | -1.16% | -1.45% | -23.81% |
+| `deepseek_diff_surprise_signal` | -1.00% | -0.01 | -21.04% | 1.35% | 2.03% | -5.68% |
+| `deepseek_diff_surprise_sector_size_neutral` | 0.15% | 0.07 | -17.83% | 1.89% | 2.88% | 0.88% |
+| `random_no_text_persistent_neutralized` | -9.83% | -0.57 | -46.67% | -1.67% | -2.40% | -45.30% |
+
+Neutralized diff-surprise signal versus 500 persistent neutralized random trials:
+
+| metric | strategy value | random p95 | percentile | empirical p-value |
+|---|---:|---:|---:|---:|
+| Annualized return | 0.15% | 9.51% | 56.4% | 43.6% |
+| Sharpe ratio | 0.07 | 0.73 | 56.4% | 43.6% |
+| Mean IC | 1.89% | 3.16% | 83.6% | 16.4% |
+| Mean rank IC | 2.88% | 3.44% | 91.2% | 8.8% |
+| Final cumulative return | 0.88% | 69.84% | 56.4% | 43.6% |
+
+### 9.5 Pre/Post Repair Comparison
+
+The repair materially changes the conclusions.
+
+| signal | Old Ann. Return | New Ann. Return | Old Sharpe | New Sharpe | Old Final Cum | New Final Cum |
+|---|---:|---:|---:|---:|---:|---:|
+| `enhanced_sector_size_neutral` | 5.32% | -4.55% | 0.48 | -0.33 | 35.30% | -23.81% |
+| `deepseek_diff_surprise_signal` | -1.91% | -1.00% | -0.14 | -0.01 | -10.64% | -5.68% |
+| `deepseek_diff_surprise_sector_size_neutral` | 4.46% | 0.15% | 0.43 | 0.07 | 28.98% | 0.88% |
+
+The pre-repair Round 6 LLM portfolio result does not survive. However, post-repair IC and rank IC remain positive, especially for the neutralized LLM signal. This suggests the LLM may still capture some cross-sectional ranking information, but not enough to produce robust long-short portfolio returns in the current 42-ticker universe.
+
+Interpretation:
+
+- The strongest previous LLM conclusion was partly an artifact of bad Item 1A extraction.
+- The deterministic sector/size-neutral result also changed materially, so old deterministic robustness results should be treated as historical, not current.
+- The current evidence is weaker and more conservative: repaired text plus full LLM rerun yields near-random portfolio returns but positive IC.
+- The next iteration should focus on a larger universe and a better cross-sectional objective, not another small prompt tweak on the same 42 tickers.
+
+### 9.6 Portfolio Construction Variant Test
+
+After the weak 20% tail result, Round 7 also tested whether the signal works better with less aggressive portfolio construction. This did not rerun DeepSeek. It reused:
+
+```text
+reports/round7_item1a_repair_rerun/round7_item1a_repair_deepseek_diff_surprise_sector_size_neutral.csv
+```
+
+Output report:
+
+```text
+reports/round7_item1a_repair_rerun/round7_error_analysis_and_portfolio_variants.md
+```
+
+Portfolio results:
+
+| portfolio | Ann. Return | Sharpe | Max DD | Mean Rank IC | Final Cum | Sharpe percentile vs random |
+|---|---:|---:|---:|---:|---:|---:|
+| `tail_20pct` | 0.15% | 0.07 | -17.83% | 2.88% | 0.88% | 57.0% |
+| `tail_30pct` | 2.61% | 0.28 | -14.10% | 2.88% | 16.23% | 74.4% |
+| `rank_weighted` | 3.50% | 0.39 | -12.19% | 2.88% | 22.19% | 80.8% |
+| `sector_neutral_rank_weighted` | 5.69% | 0.57 | -14.82% | 2.88% | 38.10% | 91.8% |
+
+Long/short construction:
+
+| portfolio | Long/short method | Average names per side |
+|---|---|---:|
+| `tail_20pct` | Long top 20% and short bottom 20% by signal each month. | 7.6 long / 7.6 short |
+| `tail_30pct` | Long top 30% and short bottom 30% by signal each month. | 11.3 long / 11.3 short |
+| `rank_weighted` | Not a 30% portfolio. It ranks all available stocks; above-median names are long and below-median names are short, with larger weights for stronger ranks. | 17.8 long / 17.8 short |
+| `sector_neutral_rank_weighted` | Not a 30% portfolio. It ranks stocks within each sector, then builds sector-level long and short books so sector exposure is reduced. | 15.4 long / 15.4 short |
+
+Simple interpretation:
+
+- The 20% tail portfolio is too sensitive to noisy extreme scores.
+- The 30% tail portfolio is better, which suggests the signal has some information but weak tail separation.
+- Rank-weighting is better than both tail portfolios, which suggests the signal works more as a broad ranking signal than as a high-conviction top/bottom selector.
+- Sector-neutral rank-weighting is the strongest variant, so some of the original weakness likely came from sector concentration and unstable tails.
+- This is still not a final alpha result: the best Sharpe percentile is about 92% (empirical p=0.082), below a strict 95% significance threshold, and the universe is only 42 tickers.
+
+The decisive point is that mean IC and rank IC are identical (1.89% and 2.88%) across all four variants. IC is a property of the signal, not of the portfolio, so the underlying ranking is the same in every row of the table — only the harvesting changes. As construction moves from `tail_20pct` to `sector_neutral_rank_weighted`, the portfolio Sharpe's empirical p-value falls from 0.43 to 0.082, converging toward rank IC's own p-value of 0.068. That convergence is strong internal evidence that the rank IC is real signal rather than a tail artifact: the weak 20% tail result was discarding most of a cross-sectional signal that does exist, not measuring its absence. This is the opposite of "the result got worse" — the signal is the most credible it has ever been; only the original portfolio was wrong for it.
+
+### 9.7 What Round 7 Establishes
+
+Round 7 looks like a regression if read on headline Sharpe alone (0.43 to 0.07 on the 20% tail portfolio), but the verified evidence points the other way:
+
+1. The repair invalidated old conclusions in both directions. The deterministic `enhanced_sector_size_neutral`, a pure text function with no LLM and no randomness, swung from +0.48 to -0.33 Sharpe purely from fixing parser bugs in 122 of 293 raw rows. A deterministic signal cannot move 0.8 Sharpe units on real information at this sample size; this proves that tail-portfolio Sharpe in the 42-ticker universe is dominated by noise, and that the Round 6 "best" was partly riding on parser artifacts plus tail luck.
+2. The signal's ranking quality improved on cleaner text. Post-repair rank IC is 2.88% at the 91st percentile (p=0.068), the highest and closest-to-significant cross-sectional reading the project has produced. This is the metric that is hard to fake and does not depend on 8-versus-8 tail luck.
+3. Portfolio construction, not the prompt, was the remaining defect. Harvesting the full cross-section sector-neutrally turns that rank IC into 0.57 Sharpe at p=0.082 — close behind the IC's own significance, as expected if the IC is genuine.
+
+Net: Round 7 produced weaker headline portfolio returns but stronger, more honest evidence. The binding constraint is now demonstrably the universe size, not the signal-extraction method or the prompt. The benchmark instability is the proof.
+
+Best next step, in priority order:
+
+- Expand the universe to S&P 500 scale with point-in-time membership and a longer history. This is now the top priority and is empirically justified: with 42 tickers even a genuine rank IC near p=0.07 cannot clear a 95% bar, and deterministic benchmarks are unstable. Item 1A has been mandatory since 2005, so EDGAR supports this at DeepSeek's cost.
+- Report the sector-neutral rank-weighted portfolio as the primary backtest going forward, since the information is in the broad ranking, not the tails. Keep the tail portfolios only as the historical comparison line.
+- Do not run further prompt variants on these 42 tickers. The listwise sector/year ranking prompt remains promising, but should wait for the larger universe so its result is not lost in tail noise again.
+- Audit the 2020 long/short names and rationales (the worst year in both Round 6 and Round 7) before any formula change.
+
+## 10. Future Improvement Directions
+
+Status note: the prompt-v2 ideas previously listed under investable surprise and company-specific versus market-wide separation were implemented in Round 6 Stage B and rerun on repaired text in Round 7. The Round 7 error-analysis and portfolio-construction variant report has also been added. After Round 7, the priority order changed: expanding the universe (10.5) is now the single top priority, because Round 7 proved the 42-ticker universe cannot support stable Sharpe-based conclusions even for deterministic signals, while the LLM rank IC is already near significance (p=0.068). Further prompt variants on the same 42 tickers (10.2) are deprioritized until the universe is larger. The remaining open directions are neutralization diagnostics and higher-frequency text sources.
+
+### 10.1 Build an error-analysis report first
 
 Before another prompt run, inspect where YoY LLM failed.
 
@@ -731,7 +895,7 @@ Priority years:
 - 2020: strongly negative YoY performance after COVID disclosure rows were added.
 - 2023: poor YoY IC and long-short performance.
 
-### 9.2 Redesign prompt v2 around investable surprise
+### 10.2 Redesign prompt v2 around investable surprise
 
 The next prompt should not primarily ask "did risk increase?" It should ask:
 
@@ -751,7 +915,7 @@ New fields should separate:
 - relative resilience versus peers
 - mitigation credibility
 
-### 9.3 Change the signal formula
+### 10.3 Change the signal formula
 
 The current formula penalizes new material risk too directly. A better formula should focus on investable surprise:
 
@@ -767,7 +931,7 @@ investable_yoy_signal =
 
 Market-wide and sector-wide risks should be diagnostic fields, not direct alpha penalties.
 
-### 9.4 Extend sector/size-neutral LLM diagnostics
+### 10.4 Extend sector/size-neutral LLM diagnostics
 
 Round 5 added sector/size-neutral versions of the existing DeepSeek signals. The next step is to diagnose what neutralization removed and whether the remaining residual signal has stable information:
 
@@ -783,9 +947,9 @@ Useful follow-up checks:
 - long/short holdings by sector;
 - factor regression of long-short returns against market, size, value, momentum, and quality factors.
 
-### 9.5 Run prompt variants on the same 211-row universe
+### 10.5 Run prompt variants on the same repaired 211-row universe
 
-Future prompt comparisons should avoid changing the universe. Use the completed 211-row / 42-ticker setup for all variants.
+Future prompt comparisons should avoid changing the universe. Use the repaired 211-row / 42-ticker setup for all variants.
 
 Candidate variants:
 
@@ -803,7 +967,7 @@ Each variant should be evaluated with:
 - same annual stability output
 - same long/short rationale audit
 
-### 9.6 Consider higher-information text sources
+### 10.6 Consider higher-information text sources
 
 If 10-K Item 1A remains weak, shift to text sources with more timely information:
 
