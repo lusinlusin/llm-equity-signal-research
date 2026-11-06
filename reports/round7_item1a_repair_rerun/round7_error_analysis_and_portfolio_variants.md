@@ -5,7 +5,7 @@ Inputs:
 - Signal: `reports/round7_item1a_repair_rerun/round7_item1a_repair_deepseek_diff_surprise_sector_size_neutral.csv`
 - Features: `data/processed/llm_diff_surprise_features_deepseek_item1a_repair.csv`
 - DeepSeek was not rerun; this analysis uses existing post-repair Round 7 features.
-- Baseline check: 0.0000002579 max absolute monthly-return difference vs saved Round 7 baseline
+- Baseline check: 0.0000002834 max absolute monthly-return difference vs saved Round 7 baseline
 
 ## Portfolio Variant Results
 

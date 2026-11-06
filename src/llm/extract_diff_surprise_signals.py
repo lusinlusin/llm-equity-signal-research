@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -142,14 +143,20 @@ def extract_diff_surprise_features(
         else:
             payload = extractor.extract_signal(sector=record["sector"], diff=diff)
 
-        row = _format_row_dates(record.drop(labels=["prior_text"]).to_dict())
+        # Drop the full Item 1A text from the feature file: it is huge and unused
+        # downstream, and a smaller file makes the per-row checkpoint write fast.
+        row = _format_row_dates(record.drop(labels=["prior_text", "text"], errors="ignore").to_dict())
         row.update(_diff_stats(diff))
         row.update(_prefixed_diff_fields(payload, provider=provider, model=output_model))
         rows.append(row)
 
         combined = pd.concat([existing, pd.DataFrame(rows)], ignore_index=True)
         output.parent.mkdir(parents=True, exist_ok=True)
-        combined.to_csv(output, index=False)
+        # Atomic checkpoint: write to a temp file then rename, so a mid-write kill
+        # leaves the previous complete file intact instead of a truncated CSV.
+        tmp_output = output.with_suffix(output.suffix + ".tmp")
+        combined.to_csv(tmp_output, index=False)
+        os.replace(tmp_output, output)
         print(
             f"Processed {row_number}/{total}: {record['ticker']} {filing_date} vs {prior_date} "
             f"(similarity={diff.similarity:.2f}, net_signal={payload['net_signal']:+.0f})",
