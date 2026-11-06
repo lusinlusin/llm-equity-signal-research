@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -18,6 +22,18 @@ SEC_DATA_BASE = "https://data.sec.gov"
 SEC_FILES_BASE = "https://www.sec.gov/files"
 SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives"
 DEFAULT_USER_AGENT = "llm-equity-signal-research/0.1 (contact: wulinw2wdl@gmail.com)"
+SEC_RISK_FACTOR_COLUMNS = [
+    "date",
+    "ticker",
+    "source_type",
+    "cik",
+    "company_name",
+    "accession_number",
+    "filing_date",
+    "report_date",
+    "document_url",
+    "text",
+]
 DEFAULT_SEC_TICKERS: tuple[str, ...] = (
     "AAPL",
     "MSFT",
@@ -132,6 +148,7 @@ def _filing_records_from_arrays(
     filings: dict,
     start_year: int,
     end_year: int,
+    forms: tuple[str, ...] = ("10-K",),
 ) -> list[FilingRecord]:
     columns = (
         filings["form"],
@@ -143,13 +160,14 @@ def _filing_records_from_arrays(
     if len({len(column) for column in columns}) != 1:
         raise ValueError("SEC submissions arrays have mismatched lengths")
     rows = zip(*columns)
+    form_set = {form.upper() for form in forms}
 
     records = []
     for form, accession, filing_date, report_date, primary_document in rows:
         if not filing_date:
             continue
         filing_year = int(filing_date[:4])
-        if form == "10-K" and start_year <= filing_year <= end_year:
+        if form.upper() in form_set and start_year <= filing_year <= end_year:
             records.append(
                 FilingRecord(
                     ticker=ticker,
@@ -164,16 +182,17 @@ def _filing_records_from_arrays(
     return records
 
 
-def get_recent_10k_filings(
+def get_recent_filings_by_form(
     ticker: str,
     cik: int,
     company_name: str,
     start_year: int,
     end_year: int,
+    forms: tuple[str, ...],
     user_agent: str = DEFAULT_USER_AGENT,
     include_older: bool = False,
 ) -> list[FilingRecord]:
-    """Fetch recent 10-K filing metadata for one company."""
+    """Fetch recent filing metadata for one company and one or more forms."""
     submissions = _sec_get_json(
         f"{SEC_DATA_BASE}/submissions/CIK{cik:010d}.json",
         user_agent=user_agent,
@@ -186,6 +205,7 @@ def get_recent_10k_filings(
         filings=recent,
         start_year=start_year,
         end_year=end_year,
+        forms=forms,
     )
 
     if include_older:
@@ -202,6 +222,7 @@ def get_recent_10k_filings(
                     filings=older,
                     start_year=start_year,
                     end_year=end_year,
+                    forms=forms,
                 )
             )
 
@@ -209,18 +230,78 @@ def get_recent_10k_filings(
     return sorted(unique.values(), key=lambda filing: filing.filing_date)
 
 
-_RISK_WORD = r"r\s*i\s*s\s*k"
-_FACTORS_WORD = r"f\s*a\s*c\s*t\s*o\s*r\s*s"
+def get_recent_10k_filings(
+    ticker: str,
+    cik: int,
+    company_name: str,
+    start_year: int,
+    end_year: int,
+    user_agent: str = DEFAULT_USER_AGENT,
+    include_older: bool = False,
+) -> list[FilingRecord]:
+    """Fetch recent 10-K filing metadata for one company."""
+    return get_recent_filings_by_form(
+        ticker=ticker,
+        cik=cik,
+        company_name=company_name,
+        start_year=start_year,
+        end_year=end_year,
+        forms=("10-K",),
+        user_agent=user_agent,
+        include_older=include_older,
+    )
+
+
+_LETTER_GAP = r"[\s|]*"
+_ITEM_WORD = rf"i{_LETTER_GAP}t{_LETTER_GAP}e{_LETTER_GAP}m"
+_RISK_WORD = rf"r{_LETTER_GAP}i{_LETTER_GAP}s{_LETTER_GAP}k"
+_FACTORS_WORD = rf"f{_LETTER_GAP}a{_LETTER_GAP}c{_LETTER_GAP}t{_LETTER_GAP}o{_LETTER_GAP}r{_LETTER_GAP}s"
+_ITEM_1A_MARKER = r"1[\s|.]*a"
+_ITEM_END_MARKER = r"(1[\s|.]*b|1[\s|.]*c|2|3|4|5|6|7[\s|.]*a|7|8)"
+_ITEM_HEADING_SEPARATOR = r"(?:[\s.:|/\-—–]*)"
 _ITEM_1A_START_PATTERN = re.compile(
-    rf"\bitem\s+1a[.:]?\s*[-—–]?\s*{_RISK_WORD}\s+{_FACTORS_WORD}\b",
+    rf"\b{_ITEM_WORD}\b{_ITEM_HEADING_SEPARATOR}{_ITEM_1A_MARKER}\b"
+    rf"{_ITEM_HEADING_SEPARATOR}{_RISK_WORD}\s+{_FACTORS_WORD}\b",
     re.IGNORECASE,
 )
 _ITEM_1A_END_PATTERN = re.compile(
-    r"\bitem\s+(1b|1c|2)[.:]?\s*[-—–]?\s*"
-    r"(unresolved\s+staff\s+comments|cybersecurity|properties)?\b",
+    rf"\b{_ITEM_WORD}\b{_ITEM_HEADING_SEPARATOR}{_ITEM_END_MARKER}\b{_ITEM_HEADING_SEPARATOR}",
     re.IGNORECASE,
 )
+_TABLE_OF_CONTENTS_NEXT_ITEMS = {"1b", "1c", "2", "3", "4"}
+_ANNUAL_RISK_FACTORS_START_PATTERN = re.compile(
+    rf"^\s*{_RISK_WORD}\s+{_FACTORS_WORD}\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_ANNUAL_RISK_FACTORS_END_PATTERN = re.compile(
+    r"^\s*("
+    r"net\s+zero\s+and\s+sustainability\s*$|"
+    r"sustainability\s*$|"
+    r"human\s+capital\s+resources(?:\s+and\s+management)?\s*$|"
+    r"managing\s+global\s+risk.*$|"
+    r"significant\s+accounting\s+policies.*$|"
+    r"recent\s+accounting\s+developments\s*$|"
+    r"forward-looking\s+statements\s*$|"
+    r"unresolved\s+staff\s+comments.*$|"
+    r"cybersecurity\s*$|"
+    r"properties(?:\s+and\s+legal\s+proceedings)?\s*$|"
+    r"legal\s+proceedings\s*$|"
+    r"market\s+for\s+registrant.*$|"
+    r"financial\s+statements\s+and\s+supplementary\s+data.*$|"
+    r"directors,\s+executive\s+officers.*$|"
+    r"exhibits\s*$|"
+    r"form\s+10-k\s+cross\s+reference\s+index\s*$|"
+    r"signatures\s*$"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
 _CROSS_REFERENCE_FOLLOWERS = {'"', "'", "”", "’", ",", ";", ")", "]"}
+_CROSS_REFERENCE_PREFIX_PATTERN = re.compile(
+    r"(refer\s+to|included\s+in|under|see|see\s+also|discussed\s+in|"
+    r"described\s+in|set\s+forth\s+in|section\s+titled|and|or)\s*"
+    r"[\"'“‘]?$",
+    re.IGNORECASE,
+)
 
 
 def _at_line_start(text: str, position: int) -> bool:
@@ -230,12 +311,26 @@ def _at_line_start(text: str, position: int) -> bool:
     return index < 0 or text[index] == "\n"
 
 
+def _has_cross_reference_prefix(text: str, position: int) -> bool:
+    before = re.sub(r"\s+", " ", text[max(0, position - 180): position]).strip()
+    return bool(_CROSS_REFERENCE_PREFIX_PATTERN.search(before))
+
+
+def _has_cross_reference_follower(text: str, position: int) -> bool:
+    after = text[position: position + 40].lstrip()
+    return after[:1] in _CROSS_REFERENCE_FOLLOWERS or bool(re.match(r"[.)]*\s*[\"'”’]", after))
+
+
 def _document_plain_text(document_html: str) -> str:
     soup = BeautifulSoup(document_html, "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
 
     text = soup.get_text("\n")
+    return _normalize_plain_text(text)
+
+
+def _normalize_plain_text(text: str) -> str:
     text = re.sub(r"\xa0", " ", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n\s*\n+", "\n", text)
@@ -256,11 +351,19 @@ def _legacy_extract_item_1a(text: str) -> str:
     """
     candidates: list[str] = []
     for start_match in _ITEM_1A_START_PATTERN.finditer(text):
-        after_heading = text[start_match.end(): start_match.end() + 40].lstrip()
-        if after_heading[:1] in _CROSS_REFERENCE_FOLLOWERS:
+        if _has_cross_reference_prefix(text, start_match.start()):
+            continue
+        if _has_cross_reference_follower(text, start_match.end()):
             continue
         start = start_match.start()
-        end_match = _ITEM_1A_END_PATTERN.search(text, start_match.end())
+        end_match = next(
+            (
+                match
+                for match in _ITEM_1A_END_PATTERN.finditer(text, start_match.end())
+                if not _has_cross_reference_prefix(text, match.start())
+            ),
+            None,
+        )
         end = end_match.start() if end_match else min(len(text), start + 200_000)
         candidate = text[start:end].strip()
         if len(candidate) >= 1_000:
@@ -269,6 +372,61 @@ def _legacy_extract_item_1a(text: str) -> str:
     if not candidates:
         return ""
     return _collapse_section(max(candidates, key=len))
+
+
+def _extract_item_1a_from_plain_text(text: str) -> str:
+    bounded: list[str] = []
+    unbounded: list[str] = []
+    for start_match in _ITEM_1A_START_PATTERN.finditer(text):
+        if not _at_line_start(text, start_match.start()):
+            continue
+        if _has_cross_reference_prefix(text, start_match.start()):
+            continue
+        if _has_cross_reference_follower(text, start_match.end()):
+            continue
+
+        start = start_match.start()
+        skip_start = False
+        for end_match in _ITEM_1A_END_PATTERN.finditer(text, start_match.end()):
+            if not _at_line_start(text, end_match.start()):
+                continue
+            if _has_cross_reference_prefix(text, end_match.start()):
+                continue
+            candidate = text[start:end_match.start()].strip()
+            if len(candidate) < 1_000:
+                end_marker = re.sub(r"[\s|.]", "", end_match.group(1).lower())
+                if end_marker in _TABLE_OF_CONTENTS_NEXT_ITEMS:
+                    skip_start = True
+                    break
+                continue
+            if len(candidate) >= 1_000:
+                bounded.append(candidate)
+                break
+        else:
+            candidate = text[start: min(len(text), start + 200_000)].strip()
+            if len(candidate) >= 1_000:
+                unbounded.append(candidate)
+        if skip_start:
+            continue
+
+    candidates = bounded or unbounded
+    if candidates:
+        return _collapse_section(max(candidates, key=len))
+
+    annual_candidates: list[str] = []
+    for start_match in _ANNUAL_RISK_FACTORS_START_PATTERN.finditer(text):
+        start = start_match.start()
+        end_match = _ANNUAL_RISK_FACTORS_END_PATTERN.search(text, start_match.end())
+        if end_match is None:
+            continue
+        candidate = text[start:end_match.start()].strip()
+        if len(candidate) >= 1_000:
+            annual_candidates.append(candidate)
+
+    if annual_candidates:
+        return _collapse_section(max(annual_candidates, key=len))
+
+    return _legacy_extract_item_1a(text)
 
 
 def extract_item_1a_risk_factors(document_html: str) -> str:
@@ -281,39 +439,93 @@ def extract_item_1a_risk_factors(document_html: str) -> str:
     end at a real Item 1B/1C/2 heading are preferred over the open-ended
     200k-char fallback for the same reason.
     """
-    text = _document_plain_text(document_html)
+    return _extract_item_1a_from_plain_text(_document_plain_text(document_html))
 
-    bounded: list[str] = []
-    unbounded: list[str] = []
-    for start_match in _ITEM_1A_START_PATTERN.finditer(text):
-        if not _at_line_start(text, start_match.start()):
+
+def _pdf_plain_text_with_pdftotext(raw_pdf: bytes) -> str:
+    pdftotext = shutil.which("pdftotext")
+    if not pdftotext:
+        return ""
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        pdf_path = Path(tmp_dir) / "filing.pdf"
+        text_path = Path(tmp_dir) / "filing.txt"
+        pdf_path.write_bytes(raw_pdf)
+        try:
+            subprocess.run(
+                [pdftotext, "-layout", str(pdf_path), str(text_path)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return ""
+        return text_path.read_text(encoding="utf-8", errors="replace")
+
+
+def _pdf_plain_text_with_pypdf(raw_pdf: bytes) -> str:
+    try:
+        from PyPDF2 import PdfReader
+    except ImportError:
+        return ""
+
+    try:
+        reader = PdfReader(io.BytesIO(raw_pdf))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        return ""
+
+
+def _extract_item_1a_from_pdf(raw_pdf: bytes) -> str:
+    for text in (_pdf_plain_text_with_pdftotext(raw_pdf), _pdf_plain_text_with_pypdf(raw_pdf)):
+        if not text:
             continue
-        after_heading = text[start_match.end(): start_match.end() + 40].lstrip()
-        if after_heading[:1] in _CROSS_REFERENCE_FOLLOWERS:
+        risk_factors = _extract_item_1a_from_plain_text(_normalize_plain_text(text))
+        if risk_factors:
+            return risk_factors
+    return ""
+
+
+def _related_ars_filings(filing: FilingRecord, user_agent: str, max_day_gap: int = 7) -> list[FilingRecord]:
+    target_date = pd.Timestamp(filing.filing_date)
+    candidates = get_recent_filings_by_form(
+        ticker=filing.ticker,
+        cik=filing.cik,
+        company_name=filing.company_name,
+        start_year=target_date.year - 1,
+        end_year=target_date.year + 1,
+        forms=("ARS",),
+        user_agent=user_agent,
+        include_older=False,
+    )
+    nearby = [
+        candidate
+        for candidate in candidates
+        if abs((pd.Timestamp(candidate.filing_date) - target_date).days) <= max_day_gap
+    ]
+    return sorted(nearby, key=lambda candidate: abs((pd.Timestamp(candidate.filing_date) - target_date).days))
+
+
+def _extract_filing_risk_factors(filing: FilingRecord, user_agent: str) -> tuple[str, str]:
+    raw_html = _sec_get(filing.document_url, user_agent=user_agent).decode("utf-8", errors="replace")
+    risk_factors = extract_item_1a_risk_factors(raw_html)
+    if risk_factors:
+        return risk_factors, filing.document_url
+
+    for annual_report in _related_ars_filings(filing, user_agent=user_agent):
+        if not annual_report.primary_document.lower().endswith(".pdf"):
             continue
+        raw_pdf = _sec_get(annual_report.document_url, user_agent=user_agent)
+        risk_factors = _extract_item_1a_from_pdf(raw_pdf)
+        if risk_factors:
+            print(
+                f"Using ARS PDF fallback for {filing.ticker} {filing.filing_date}: "
+                f"{annual_report.document_url}",
+                flush=True,
+            )
+            return risk_factors, annual_report.document_url
 
-        start = start_match.start()
-        end_match = next(
-            (
-                match
-                for match in _ITEM_1A_END_PATTERN.finditer(text, start_match.end())
-                if _at_line_start(text, match.start())
-            ),
-            None,
-        )
-        if end_match is not None:
-            candidate = text[start:end_match.start()].strip()
-            bucket = bounded
-        else:
-            candidate = text[start: min(len(text), start + 200_000)].strip()
-            bucket = unbounded
-        if len(candidate) >= 1_000:
-            bucket.append(candidate)
-
-    candidates = bounded or unbounded
-    if not candidates:
-        return _legacy_extract_item_1a(text)
-    return _collapse_section(max(candidates, key=len))
+    return "", filing.document_url
 
 
 def download_10k_risk_factor_records(
@@ -345,9 +557,9 @@ def download_10k_risk_factor_records(
         )
 
         for filing in filings:
-            raw_html = _sec_get(filing.document_url, user_agent=user_agent).decode("utf-8", errors="replace")
-            risk_factors = extract_item_1a_risk_factors(raw_html)
+            risk_factors, document_url = _extract_filing_risk_factors(filing, user_agent=user_agent)
             if not risk_factors:
+                print(f"No Item 1A extracted for {normalized_ticker} {filing.filing_date}", flush=True)
                 continue
 
             records.append(
@@ -360,12 +572,15 @@ def download_10k_risk_factor_records(
                     "accession_number": filing.accession_number,
                     "filing_date": filing.filing_date,
                     "report_date": filing.report_date,
-                    "document_url": filing.document_url,
+                    "document_url": document_url,
                     "text": risk_factors,
                 }
             )
 
-    return pd.DataFrame(records).sort_values(["date", "ticker"]).reset_index(drop=True)
+    records_df = pd.DataFrame(records, columns=SEC_RISK_FACTOR_COLUMNS)
+    if records_df.empty:
+        return records_df
+    return records_df.sort_values(["date", "ticker"]).reset_index(drop=True)
 
 
 def save_sec_10k_risk_factors(
@@ -453,8 +668,7 @@ def download_prior_context_records(
                 print(f"Already downloaded {ticker} {filing.filing_date}", flush=True)
                 continue
 
-            raw_html = _sec_get(filing.document_url, user_agent=user_agent).decode("utf-8", errors="replace")
-            risk_factors = extract_item_1a_risk_factors(raw_html)
+            risk_factors, document_url = _extract_filing_risk_factors(filing, user_agent=user_agent)
             if not risk_factors:
                 print(f"No Item 1A extracted for {ticker} {filing.filing_date}", flush=True)
                 continue
@@ -469,13 +683,13 @@ def download_prior_context_records(
                     "accession_number": filing.accession_number,
                     "filing_date": filing.filing_date,
                     "report_date": filing.report_date,
-                    "document_url": filing.document_url,
+                    "document_url": document_url,
                     "text": risk_factors,
                 }
             )
             print(f"Downloaded prior context {ticker} {filing.filing_date}", flush=True)
 
-    combined = pd.concat([existing, pd.DataFrame(records)], ignore_index=True)
+    combined = pd.concat([existing, pd.DataFrame(records, columns=SEC_RISK_FACTOR_COLUMNS)], ignore_index=True)
     if not combined.empty:
         combined = (
             combined.drop_duplicates(subset=["ticker", "date", "accession_number"], keep="last")

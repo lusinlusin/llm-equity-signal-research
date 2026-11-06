@@ -8,6 +8,7 @@ import pandas as pd
 from src.analysis.comparison import compare_strategy_summaries, summarize_annual_stability
 from src.analysis.monte_carlo import compare_to_random_distribution, run_random_baseline_trials
 from src.analysis.plots import plot_multi_cumulative_returns
+from src.analysis.primary_backtest import build_primary_backtest_summary
 from src.data.metadata import load_ticker_metadata
 from src.data.prices import DEFAULT_TICKERS
 from src.data.texts import load_text_dataset
@@ -81,6 +82,7 @@ DEFAULT_CHANGE_NOTES = (
 
 def _write_report(
     metrics: pd.DataFrame,
+    primary_summary: pd.DataFrame,
     coverage: pd.Series,
     significance: pd.DataFrame,
     output_path: Path,
@@ -112,6 +114,35 @@ def _write_report(
     display["sharpe_ratio"] = display["sharpe_ratio"].map(lambda value: f"{value:.2f}")
     display["n_periods"] = display["n_periods"].astype(int)
 
+    primary_display = primary_summary[
+        [
+            "portfolio_method",
+            "mean_rank_ic",
+            "annualized_return",
+            "sharpe_ratio",
+            "final_cumulative_return",
+            "random_sharpe_percentile",
+            "factor_ann_alpha",
+            "factor_alpha_t",
+            "factor_alpha_p",
+        ]
+    ].copy()
+    for column in (
+        "mean_rank_ic",
+        "annualized_return",
+        "final_cumulative_return",
+        "random_sharpe_percentile",
+        "factor_ann_alpha",
+    ):
+        primary_display[column] = primary_display[column].map(_format_pct)
+    for column in ("sharpe_ratio", "factor_alpha_t"):
+        primary_display[column] = primary_display[column].map(
+            lambda value: f"{value:.2f}" if pd.notna(value) else "nan"
+        )
+    primary_display["factor_alpha_p"] = primary_display["factor_alpha_p"].map(
+        lambda value: f"{value:.3f}" if pd.notna(value) else "nan"
+    )
+
     sig_display = significance[
         ["strategy_value", "random_mean", "random_p50", "random_p95", "strategy_percentile"]
     ].copy()
@@ -137,6 +168,12 @@ def _write_report(
         "## Metrics",
         "",
         display.to_markdown(),
+        "",
+        "## Primary Backtest: Sector-Neutral Rank-Weighted",
+        "",
+        "This is the forward-looking default portfolio construction. The 20% tail metrics above are kept as historical comparison.",
+        "",
+        primary_display.to_markdown(),
         "",
         significance_title,
         "",
@@ -296,15 +333,33 @@ def run_round5_soundness_comparison(
     )
     target_metrics = metrics.loc[yoy_neutral_label].copy()
     significance = compare_to_random_distribution(target_metrics, random_trials)
+    primary_backtest = build_primary_backtest_summary(
+        signals=signals,
+        forward_returns=forward_returns,
+        metadata=metadata,
+        n_trials=n_trials,
+    )
+    primary_summary = primary_backtest["summary"]
+    primary_metrics = primary_backtest["metrics"]
+    primary_significance = primary_backtest["significance"]
+    primary_random_trials = primary_backtest["random_trials"]
+    primary_portfolio_returns = primary_backtest["portfolio_returns"]
 
     metrics.to_csv(output / f"{artifact_prefix}_metrics.csv")
+    primary_summary.to_csv(output / f"{artifact_prefix}_primary_backtest_summary.csv")
+    primary_metrics.to_csv(output / f"{artifact_prefix}_primary_backtest_metrics.csv")
     coverage.to_frame("value").to_csv(output / f"{artifact_prefix}_coverage.csv")
     random_trials.to_csv(output / f"{signal_prefix}_persistent_neutralized_random_baseline_trials.csv")
     significance.to_csv(output / f"{signal_prefix}_yoy_neutralized_random_significance.csv")
+    primary_random_trials.to_csv(output / f"{signal_prefix}_primary_random_baseline_trials.csv", index=False)
+    primary_significance.to_csv(output / f"{signal_prefix}_primary_random_significance.csv", index=False)
     for name, signal in signals.items():
         signal.to_csv(output / f"{signal_prefix}_{name}.csv")
         strategy_results[name]["portfolio_returns"].to_csv(
             output / f"{signal_prefix}_{name}_portfolio_returns.csv"
+        )
+        primary_portfolio_returns[name].to_csv(
+            output / f"{signal_prefix}_{name}_primary_portfolio_returns.csv"
         )
         strategy_results[name]["ic"].to_csv(output / f"{signal_prefix}_{name}_ic.csv")
         summarize_annual_stability(
@@ -314,6 +369,7 @@ def run_round5_soundness_comparison(
 
     _write_report(
         metrics=metrics,
+        primary_summary=primary_summary,
         coverage=coverage,
         significance=significance,
         output_path=output / f"{artifact_prefix}_comparison.md",
@@ -330,6 +386,8 @@ def run_round5_soundness_comparison(
         "metrics": metrics,
         "coverage": coverage,
         "significance": significance,
+        "primary_summary": primary_summary,
+        "primary_significance": primary_significance,
         "cumulative": cumulative,
         **strategy_results,
     }
